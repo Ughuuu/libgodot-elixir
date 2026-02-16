@@ -121,16 +121,16 @@ jobs:
         shell: bash
         run: |
           python -c "import sys; print(sys.version)"
-          python -m pip install scons==4.0
+          python -m pip install "scons>=4.8,<5"
           scons --version
       - name: Restore SCons cache
         uses: actions/cache/restore@v4
         with:
           path: .scons_cache/
-          key: scons|${{ runner.os }}|${{ github.ref_name }}|${{ github.sha }}
+          key: scons4|${{ runner.os }}|${{ github.ref_name }}|${{ github.sha }}
           restore-keys: |
-            scons|${{ runner.os }}|${{ github.ref_name }}|
-            scons|${{ runner.os }}|
+            scons4|${{ runner.os }}|${{ github.ref_name }}|
+            scons4|${{ runner.os }}|
 
       - name: Build libgodot
         if: runner.os != 'Windows'
@@ -154,6 +154,8 @@ jobs:
           Write-Host "cl:" (where.exe cl) 
           Write-Host "ar (should be absent/unused):" 
           try { where.exe ar } catch { Write-Host "(not found)" }
+
+          python -c "from SCons.Tool.MSCommon import msvc_exists; import sys; ok=msvc_exists(); print(f'msvc_exists={ok}'); sys.exit(0 if ok else 1)"
 
           Push-Location godot
           # Build host editor (for dumping GDExtension API).
@@ -186,7 +188,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .scons_cache/
-          key: scons|${{ runner.os }}|${{ github.ref_name }}|${{ github.sha }}
+          key: scons4|${{ runner.os }}|${{ github.ref_name }}|${{ github.sha }}
 
       - name: Build and precompile NIF (elixir_make)
         if: runner.os != 'Windows'
