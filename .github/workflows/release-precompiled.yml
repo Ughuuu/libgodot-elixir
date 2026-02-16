@@ -107,15 +107,25 @@ jobs:
           # Keep this list conservative to avoid CI breakage from formula changes.
           brew install cmake molten-vk vulkan-headers vulkan-loader shaderc
 
-      - name: Set up MSVC dev environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Set up Python 3.x
         uses: actions/setup-python@v5
         with:
           # Semantic version range syntax or exact version of a Python version.
           python-version: 3.8
+
+      - name: Set up MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          path-type: minimal
+          install: >-
+            make
+            tar
+            unzip
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-python
 
       - name: Setup SCons
         shell: bash
@@ -146,43 +156,13 @@ jobs:
         if: runner.os == 'Windows'
         env:
           SCONSFLAGS: cache_path=${{ github.workspace }}/.scons_cache/ deprecated=yes
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $ErrorActionPreference = 'Stop'
-
-          Write-Host "python:" (python --version)
-          Write-Host "cl:" (where.exe cl) 
-          Write-Host "ar (should be absent/unused):" 
-          try { where.exe ar } catch { Write-Host "(not found)" }
-
-          python -c "from SCons.Tool.MSCommon import msvc_exists; import sys; ok=msvc_exists(); print(f'msvc_exists={ok}'); sys.exit(0 if ok else 1)"
-
-          Push-Location godot
-          # Build host editor (for dumping GDExtension API).
-          scons platform=windows target=editor dev_mode=yes windows_subsystem=console use_mingw=no werror=no strict_checks=no warnings=no
-
-          # Build target libgodot (shared library for embedding).
-          scons platform=windows target=editor arch=x86_64 opengl3=yes library_type=shared_library production=yes optimize=speed_trace lto=full deprecated=yes windows_subsystem=console use_mingw=no werror=no strict_checks=no warnings=no
-
-          New-Item -ItemType Directory -Force -Path ..\build\gdextension | Out-Null
-          Copy-Item -Force bin\godot.windows.editor.x86_64.exe ..\build\godot.exe
-
-          # Dump GDExtension API.
-          Push-Location ..\build\gdextension
-          ..\godot.exe --headless --dump-extension-api
-          Pop-Location
-
-          Copy-Item -Force core\extension\gdextension_interface.h ..\build\gdextension\
-          Copy-Item -Force core\extension\libgodot.h ..\build\gdextension\
-
-          if (Test-Path bin\libgodot.windows.editor.x86_64.dll) {
-            Copy-Item -Force bin\libgodot.windows.editor.x86_64.dll ..\build\libgodot.dll
-            Write-Host "Copied libgodot.dll from:" (Resolve-Path bin\libgodot.windows.editor.x86_64.dll)
-          } else {
-            Write-Error "Failed to locate bin\\libgodot.windows.editor.x86_64.dll"
-          }
-
-          Pop-Location
+          set -euo pipefail
+          uname -a
+          gcc --version
+          python --version
+          ./build_libgodot.sh --release --target windows --target-arch x86_64 --library-type shared_library
 
       - name: Save SCons cache
         uses: actions/cache/save@v4
@@ -201,17 +181,6 @@ jobs:
           export LIBGODOT_FORCE_BUILD=1
           # Run in a single Mix invocation so the Precompiler module is compiled+loaded.
           MIX_ENV=prod mix do compile --force + elixir_make.precompile
-
-      - name: Set up MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          path-type: minimal
-          install: >-
-            make
-            tar
-            unzip
 
       - name: Build and precompile NIF (elixir_make) (Windows/MSYS2)
         if: runner.os == 'Windows'
