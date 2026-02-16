@@ -162,6 +162,9 @@ jobs:
           uname -a
           gcc --version
           python --version
+          python -m pip install --upgrade pip
+          python -m pip install "scons>=4.8,<5"
+          scons --version
           ./build_libgodot.sh --release --target windows --target-arch x86_64 --library-type shared_library
 
       - name: Save SCons cache
