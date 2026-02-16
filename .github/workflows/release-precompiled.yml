@@ -159,10 +159,10 @@ jobs:
 
           Push-Location godot
           # Build host editor (for dumping GDExtension API).
-          scons platform=windows target=editor dev_mode=yes windows_subsystem=console use_mingw=no
+          scons platform=windows target=editor dev_mode=yes windows_subsystem=console use_mingw=no werror=no strict_checks=no warnings=no
 
           # Build target libgodot (shared library for embedding).
-          scons platform=windows target=editor arch=x86_64 opengl3=yes library_type=shared_library production=yes optimize=speed_trace lto=full deprecated=yes windows_subsystem=console use_mingw=no
+          scons platform=windows target=editor arch=x86_64 opengl3=yes library_type=shared_library production=yes optimize=speed_trace lto=full deprecated=yes windows_subsystem=console use_mingw=no werror=no strict_checks=no warnings=no
 
           New-Item -ItemType Directory -Force -Path ..\build\gdextension | Out-Null
           Copy-Item -Force bin\godot.windows.editor.x86_64.exe ..\build\godot.exe
