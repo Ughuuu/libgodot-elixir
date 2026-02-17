@@ -235,6 +235,20 @@ jobs:
           test -f checksum.exs
           cp -v checksum.exs dist/
 
+      - name: Upload to GitHub Release (per target)
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        with:
+          draft: true
+          prerelease: true
+          tag_name: "draft-${{ github.sha }}"
+          name: "LibGodot Connector draft-${{ github.sha }}"
+          target_commitish: "${{ github.sha }}"
+          overwrite_files: true
+          files: |
+            samples/elixir_sample/dist/*
+
       - name: Verify macOS libgodot install name (from tarball)
         if: runner.os == 'macOS'
         run: |
@@ -246,17 +260,71 @@ jobs:
           tar -xzf "${TAR}" -C "${TMPDIR}"
           otool -D "${TMPDIR}/libgodot.dylib" | tail -n 1 | grep -F "@rpath/libgodot.dylib"
 
+      - name: Upload per-target precompiled artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: precompiled-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            samples/elixir_sample/dist/*.tar.gz
+            samples/elixir_sample/dist/*.tar.gz.sha256
+
+  publish_release:
+    name: publish-release
+    runs-on: ubuntu-22.04
+    needs: build
+
+    steps:
+      - name: Download precompiled artefacts from all matrix jobs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: precompiled-*
+          merge-multiple: true
+          path: samples/elixir_sample/dist
+
+      - name: Build unified checksum file
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd samples/elixir_sample/dist
+
+          rm -f checksum.exs checksum-lib_godot_connector.exs
+
+          mapfile -t checksum_files < <(find . -maxdepth 1 -type f -name '*.tar.gz.sha256' -print | sed 's|^./||' | sort)
+          if [ ${#checksum_files[@]} -eq 0 ]; then
+            echo "No checksum sidecar files (*.tar.gz.sha256) found"
+            exit 1
+          fi
+
+          {
+            echo "%{" 
+            for f in "${checksum_files[@]}"; do
+              tar_name="${f%.sha256}"
+              line="$(head -n1 "$f" | tr -d '\r')"
+              hash="$(printf '%s' "$line" | grep -Eo '[0-9a-fA-F]{64}' | head -n1 || true)"
+              if [ -z "$hash" ]; then
+                echo "Could not parse SHA256 from '$f' (line: '$line')"
+                exit 1
+              fi
+              printf '  "%s" => "sha256:%s",\n' "$tar_name" "$hash"
+            done
+            echo "}"
+          } > checksum.exs
+
+          cp checksum.exs checksum-lib_godot_connector.exs
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         with:
-          # This is an intermediate artefact drop created from main.
-          # It is intentionally a draft/prerelease and uses a unique per-commit tag.
+          # Upload only merged checksum files at the end so they replace per-target checksum.exs.
           draft: true
           prerelease: true
           tag_name: "draft-${{ github.sha }}"
           name: "LibGodot Connector draft-${{ github.sha }}"
           target_commitish: "${{ github.sha }}"
+          overwrite_files: true
           files: |
-            samples/elixir_sample/dist/*
+            samples/elixir_sample/dist/checksum.exs
+            samples/elixir_sample/dist/checksum-lib_godot_connector.exs
