@@ -256,7 +256,7 @@ jobs:
           draft: true
           prerelease: true
           tag_name: "draft-${{ github.sha }}"
-          name: "draft-${{ github.sha }}"
+          name: "LibGodot Connector draft-${{ github.sha }}"
           target_commitish: "${{ github.sha }}"
           files: |
             samples/elixir_sample/dist/*
