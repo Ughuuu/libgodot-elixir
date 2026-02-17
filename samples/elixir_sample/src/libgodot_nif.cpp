@@ -1,7 +1,12 @@
 #include <erl_nif.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
 #include <dlfcn.h>
 #include <unistd.h>
+#endif
 #include <cstdlib>
 #include <condition_variable>
 #include <deque>
@@ -29,7 +34,109 @@
 
 #include <cstdio>
 
-#ifdef __APPLE__
+#ifdef _WIN32
+struct Dl_info {
+    const char *dli_fname;
+};
+
+static thread_local std::string g_dlerror_text;
+static thread_local char g_dladdr_path[MAX_PATH + 1];
+
+static void set_dlerror_from_last_error(const char *prefix) {
+    DWORD err = GetLastError();
+    char *msg = nullptr;
+    FormatMessageA(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            nullptr,
+            err,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            reinterpret_cast<LPSTR>(&msg),
+            0,
+            nullptr);
+    if (msg) {
+        g_dlerror_text = std::string(prefix) + ": " + msg;
+        LocalFree(msg);
+    } else {
+        g_dlerror_text = std::string(prefix) + ": error " + std::to_string(err);
+    }
+}
+
+static void *dlopen(const char *path, int) {
+    HMODULE h = LoadLibraryA(path);
+    if (!h) {
+        set_dlerror_from_last_error("LoadLibraryA");
+        return nullptr;
+    }
+    g_dlerror_text.clear();
+    return reinterpret_cast<void *>(h);
+}
+
+static void *dlsym(void *handle, const char *symbol) {
+    FARPROC proc = GetProcAddress(reinterpret_cast<HMODULE>(handle), symbol);
+    if (!proc) {
+        set_dlerror_from_last_error("GetProcAddress");
+        return nullptr;
+    }
+    g_dlerror_text.clear();
+    return reinterpret_cast<void *>(proc);
+}
+
+static int dlclose(void *handle) {
+    if (!handle) {
+        return 0;
+    }
+    BOOL ok = FreeLibrary(reinterpret_cast<HMODULE>(handle));
+    if (!ok) {
+        set_dlerror_from_last_error("FreeLibrary");
+        return -1;
+    }
+    g_dlerror_text.clear();
+    return 0;
+}
+
+static const char *dlerror() {
+    return g_dlerror_text.empty() ? nullptr : g_dlerror_text.c_str();
+}
+
+static int dladdr(void *addr, Dl_info *info) {
+    if (!addr || !info) {
+        return 0;
+    }
+
+    HMODULE module = nullptr;
+    BOOL ok = GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(addr),
+            &module);
+    if (!ok || !module) {
+        set_dlerror_from_last_error("GetModuleHandleExA");
+        return 0;
+    }
+
+    DWORD len = GetModuleFileNameA(module, g_dladdr_path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        set_dlerror_from_last_error("GetModuleFileNameA");
+        return 0;
+    }
+
+    g_dladdr_path[len] = '\0';
+    info->dli_fname = g_dladdr_path;
+    return 1;
+}
+
+#define access _access
+#ifndef R_OK
+#define R_OK 4
+#endif
+#ifndef RTLD_LAZY
+#define RTLD_LAZY 0
+#endif
+#endif
+
+#if defined(_WIN32)
+#define LIBGODOT_DEFAULT_PATH "../../build/libgodot.dll"
+#define LIBGODOT_PRIV_NAME "libgodot.dll"
+#elif defined(__APPLE__)
 #define LIBGODOT_DEFAULT_PATH "../../build/libgodot.dylib"
 #define LIBGODOT_PRIV_NAME "libgodot.dylib"
 #else
@@ -46,7 +153,7 @@ static std::string dirname_from_path(const char *path) {
         return {};
     }
     std::string s(path);
-    auto pos = s.find_last_of('/');
+    auto pos = s.find_last_of("\\/");
     if (pos == std::string::npos) {
         return {};
     }
