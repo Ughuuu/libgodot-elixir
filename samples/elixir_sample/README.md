@@ -11,9 +11,6 @@ This is a proof-of-concept showing how to interface Elixir with LibGodot using N
 
 ## How to build
 
-1.  Ensure you have built `libgodot` in the root directory.
-2.  Build the NIF via Mix (recommended):
-
 ```bash
 cd samples/elixir_sample
 mix deps.get
@@ -21,26 +18,6 @@ mix compile
 ```
 
 This uses `elixir_make` and the local `Makefile` to drive a CMake build.
-
-### Optional: use precompiled NIFs from GitHub Releases
-
-If you publish precompiled artefacts (tarballs) to GitHub Releases for the current version,
-`mix compile` can download them instead of building locally.
-
-```bash
-cd samples/elixir_sample
-mix compile
-```
-
-To override the default URL template, set `LIBGODOT_PRECOMPILED_URL` to a template containing
-`@{artefact_filename}`.
-
-To force a local build (skip download attempts):
-
-```bash
-export LIBGODOT_FORCE_BUILD=1
-mix compile
-```
 
 ## Using this as a dependency (local + Hex)
 
@@ -54,112 +31,13 @@ Key idea: end-users installing from Hex should not need C++ tooling. During `mix
 
 If the precompiled artefact is missing/unavailable, `elixir_make` falls back to building locally (unless `LIBGODOT_FORCE_BUILD=1` is set).
 
-### Test "install elsewhere" locally (without publishing)
-
-1. Create a new scratch Elixir project somewhere else:
-
-```bash
-mix new /tmp/test_libgodot_dep
-cd /tmp/test_libgodot_dep
-```
-
-2. Add a path dependency to this sample in `/tmp/test_libgodot_dep/mix.exs`:
-
-```elixir
-defp deps do
-	[
-		{:lib_godot_connector, path: "/Users/dragosdaian/Documents/appsinacup/libgodot/samples/elixir_sample"}
-	]
-end
-```
-
-3. Run:
-
-```bash
-mix deps.get
-mix compile
-```
-
-This uses the exact same compilation/precompile logic that Hex would.
-
-### Test the precompiled download flow locally
-
-You can simulate GitHub Releases by hosting the precompiled tarballs over HTTP locally.
-
-1. In `samples/elixir_sample/`, build a precompiled archive for your current machine:
-
-```bash
-cd samples/elixir_sample
-mix deps.get
-mix elixir_make.precompile
-```
-
-The task prints the path of the generated archive (under your elixir_make cache dir).
-
-2. Serve the directory containing that archive:
-
-```bash
-cd <the-folder-with-the-generated-.tar.gz>
-python3 -m http.server 8080
-```
-
-3. In your scratch project, point the URL template to that server and compile:
-
-```bash
-export LIBGODOT_PRECOMPILED_URL='http://localhost:8080/@{artefact_filename}'
-mix deps.clean --all
-mix deps.get
-mix compile
-```
-
-If everything matches, `mix compile` will download instead of building.
-
 ## Publishing precompiled artefacts (Hex + GitHub Releases)
 
-To publish this to Hex in a way that "just works" for users:
+To publish this to Hex:
 
 1. Ensure `mix.exs` version (and release tag) match (e.g. `v4.5.1`).
-2. Build per-target/per-OTP (NIF version) tarballs on CI using `mix elixir_make.precompile`.
-3. Upload the `.tar.gz` artefacts and their checksum sidecar files (e.g. `.sha256`) to GitHub Releases.
-4. Generate and commit `checksum-lib_godot_connector.exs` so Hex installs can verify downloads:
-
-```bash
-mix elixir_make.checksum --all
-```
-
-5. Make sure the checksum file is included in the Hex package (this project already includes it when present).
-
-Note: artefacts are keyed by **target triple** and **Erlang NIF version**. If you want to support multiple OTP versions,
-you need to publish artefacts for each of those NIF versions.
-
-3.  Alternatively, build the NIF with CMake directly:
-
-```bash
-cd samples/elixir_sample
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-```
-
-For a debug build:
-
-```bash
-cd samples/elixir_sample
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-```
-
-4.  Run the Elixir code:
-
-```bash
-mix compile
-iex -S mix
-```
-
-To run it as a normal OTP application (starts `LibGodot.Driver` under supervision):
-
-```bash
-mix run --no-halt
-```
+2. Run the Github action job. That will generate targets and checksum. Download the checksum and put in `checksum-lib_godot_connector.exs` and `checksum.exs` files.
+3. Run `mix hex.publish`.
 
 ## Example Usage
 
