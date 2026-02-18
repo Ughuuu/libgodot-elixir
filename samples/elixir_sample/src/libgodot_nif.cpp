@@ -430,6 +430,11 @@ std::once_flag worker_once;
 std::atomic<uint64_t> worker_token{0};
 
 // Worker-owned state.
+// When set the worker loop will exit; the thread is joinable so we can
+// ensure clean shutdown during NIF unload.
+static std::atomic<bool> worker_should_exit{false};
+static std::thread worker_thread;
+
 void *worker_handle = nullptr;
 GDExtensionObjectPtr (*worker_create_instance)(int, char *[], GDExtensionInitializationFunction, InvokeCallbackFunction, ExecutorData, InvokeCallbackFunction, ExecutorData, LogCallbackFunction, LogCallbackData) = nullptr;
 void (*worker_destroy_instance)(GDExtensionObjectPtr) = nullptr;
@@ -470,12 +475,21 @@ static void maybe_enable_embedded_headless(const std::vector<std::string> &args)
 
 static void worker_loop() {
     for (;;) {
+        // Exit early when requested (used during NIF unload).
+        if (worker_should_exit.load(std::memory_order_acquire)) {
+            break;
+        }
+
         std::shared_ptr<Request> req;
         {
             std::unique_lock<std::mutex> lk(queue_mutex);
             queue_cv.wait(lk, [] {
-                return !queue.empty() || incoming_messages_pending.load(std::memory_order_acquire);
+                return worker_should_exit.load(std::memory_order_acquire) || !queue.empty() || incoming_messages_pending.load(std::memory_order_acquire);
             });
+
+            if (worker_should_exit.load(std::memory_order_acquire)) {
+                break;
+            }
 
             // If a message arrived, emit the signal immediately on this (Godot) thread.
             // Do not force a full frame iteration for message delivery.
@@ -633,7 +647,8 @@ static void worker_loop() {
 
 static void ensure_worker_started() {
     std::call_once(worker_once, [] {
-        std::thread(worker_loop).detach();
+        worker_should_exit.store(false);
+        worker_thread = std::thread(worker_loop);
     });
 }
 
@@ -976,6 +991,33 @@ static int nif_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
     return GODOT_RES_TYPE ? 0 : 1;
 }
 
+// Unload handler: ensure the Godot instance is shut down and the worker
+// thread is joined so that there are no background threads touching
+// Godot internals while the VM is tearing down.
+static void nif_unload(ErlNifEnv *env, void *priv_data) {
+    (void)env;
+    (void)priv_data;
+
+    // Ask the worker loop to destroy any active Godot instance.
+    // call_worker will block until the Shutdown request completes.
+    call_worker(RequestType::Shutdown, {});
+
+    // Signal the worker loop to exit and join the thread.
+    worker_should_exit.store(true);
+    queue_cv.notify_one();
+    if (worker_thread.joinable()) {
+        worker_thread.join();
+    }
+
+    // Close the dynamically loaded libgodot if still open.
+    if (worker_handle) {
+        dlclose(worker_handle);
+        worker_handle = nullptr;
+        worker_create_instance = nullptr;
+        worker_destroy_instance = nullptr;
+    }
+}
+
 static ErlNifFunc nif_funcs[] = {
     {"subscribe", 1, subscribe, 0},
 	{"send_message", 2, send_message, 0},
@@ -989,4 +1031,4 @@ static ErlNifFunc nif_funcs[] = {
     {"shutdown", 1, shutdown, ERL_NIF_DIRTY_JOB_IO_BOUND},
 };
 
-ERL_NIF_INIT(Elixir.LibGodot, nif_funcs, nif_load, nullptr, nullptr, nullptr)
+ERL_NIF_INIT(Elixir.LibGodot, nif_funcs, nif_load, nullptr, nullptr, nif_unload)

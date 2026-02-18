@@ -19,6 +19,30 @@ mix compile
 
 This uses `elixir_make` and the local `Makefile` to drive a CMake build.
 
+
+Alternatively, build the NIF with CMake directly:
+
+```bash
+cd samples/elixir_sample
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+For a debug build:
+
+```bash
+cd samples/elixir_sample
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+```
+
+Then, run the Elixir code:
+
+```bash
+mix compile
+MIX_ENV=dev mix run --no-halt
+```
+
 ## Using this as a dependency (local + Hex)
 
 This project is set up to work like a typical Hex package that ships **precompiled** NIFs.
